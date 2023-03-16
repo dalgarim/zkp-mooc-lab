@@ -5,6 +5,32 @@ pragma circom 2.0.0;
 ////////////////// Copy-pasted here for easy reference //////////////////////////////
 /////////////////////////////////////////////////////////////////////////////////////
 
+template Exp () {
+    signal input in[2];
+    signal output out;
+
+    var NUM_BITS = 8; 
+
+    signal exp[NUM_BITS];
+    signal inter[NUM_BITS];
+    signal temp[NUM_BITS];
+
+    component num2Bits = Num2Bits(NUM_BITS);
+    num2Bits.in <== in[1];
+
+    exp[0] <== in[0];
+    inter[0] <== 1;
+    for (var i = 0; i < NUM_BITS; i++) {
+        temp[i] <== num2Bits.bits[i] * exp[i] + (1 - num2Bits.bits[i]); 
+        if (i < NUM_BITS - 1) {
+            inter[i + 1] <== inter[i] * temp[i];
+            exp[i + 1] <== exp[i] * exp[i];
+        } else {
+            out <== inter[i] * temp[i];
+        }
+    }
+}
+
 /*
  * Outputs `a` AND `b`
  */
@@ -73,7 +99,7 @@ template Num2Bits(b) {
     for (var i = 0; i < b; i++) {
         sum_of_bits += (2 ** i) * bits[i];
     }
-    sum_of_bits === in;
+    //sum_of_bits === in;
 }
 
 /*
@@ -147,7 +173,10 @@ template CheckBitLength(b) {
     signal input in;
     signal output out;
 
-    // TODO
+    component n2b = Num2Bits(b+1);
+    n2b.in <== in;
+
+    out <== 1-n2b.bits[b];
 }
 
 /*
@@ -196,7 +225,23 @@ template RightShift(b, shift) {
     signal input x;
     signal output y;
 
-    // TODO
+    signal shifted[b];
+
+    component n2b = Num2Bits(b);
+    n2b.in <== x;
+
+    for ( var i = 0; i < b - shift; i++) {
+        shifted[i] <== n2b.bits[i + shift];
+    }
+
+    for ( var i = b - shift; i < b; i++) {
+        shifted[i] <== 0;
+    }
+
+    component b2n = Bits2Num(b);
+    b2n.bits <== shifted;
+    y <== b2n.out;
+
 }
 
 /*
@@ -258,7 +303,23 @@ template LeftShift(shift_bound) {
     signal input skip_checks;
     signal output y;
 
-    // TODO
+    component check_shift_bits = LessThan(shift_bound);
+    check_shift_bits.in[0] <== shift;
+    check_shift_bits.in[1] <== shift_bound;
+
+
+    component if_else = IfThenElse();
+    if_else.cond <== skip_checks;
+    if_else.L <== 1;
+    if_else.R <== check_shift_bits.out;
+
+    if_else.out === 1;
+
+    component exp = Exp();
+    exp.in[0] <== 2;
+    exp.in[1] <== shift;
+    y <== x * exp.out;
+
 }
 
 /*
@@ -272,8 +333,44 @@ template MSNZB(b) {
     signal input in;
     signal input skip_checks;
     signal output one_hot[b];
+    
+    component is_zero = IsZero();
+    is_zero.in <== in;
+    
+    component if_else = IfThenElse();
+    if_else.cond <== skip_checks;
+    if_else.L <== 0;
+    if_else.R <== is_zero.out;
 
-    // TODO
+    if_else.out === 0;
+
+    component n2b_input = Num2Bits(b);
+    n2b_input.in <== in;
+
+    //find most significant index
+    var ms_index = b-1;
+    component if_else_msb[b];
+    for (var i = 0; i < b; i++) {
+        if_else_msb[i] = IfThenElse();
+        if_else_msb[i].cond <== n2b_input.bits[i];
+        if_else_msb[i].L <== i;
+        if_else_msb[i].R <== ms_index;
+        ms_index = if_else_msb[i].out;
+    }
+
+    // set one_hot vector using ms_index and IfThenElse template
+    component if_else_one_hot[b];
+    component is_equal[b];
+    for (var i = 0; i < b; i++) {
+        is_equal[i] = IsEqual();
+        is_equal[i].in[0] <== i;
+        is_equal[i].in[1] <== ms_index;
+        if_else_one_hot[i] = IfThenElse();
+        if_else_one_hot[i].cond <== is_equal[i].out;
+        if_else_one_hot[i].L <== 1;
+        if_else_one_hot[i].R <== 0;
+        one_hot[i] <== if_else_one_hot[i].out;
+    }
 }
 
 /*
@@ -291,7 +388,38 @@ template Normalize(k, p, P) {
     signal output m_out;
     assert(P > p);
 
-    // TODO
+    component is_zero = IsZero();
+    is_zero.in <== m;
+    
+    component if_else = IfThenElse();
+    if_else.cond <== skip_checks;
+    if_else.L <== 0;
+    if_else.R <== is_zero.out;
+
+    if_else.out === 0;
+
+    component n2b_input = Num2Bits(P+1);
+    n2b_input.in <== m;
+    
+    var ms_index = P;
+    component if_else_msb[P+1];
+    for (var i = 0; i < P+1; i++) {
+        if_else_msb[i] = IfThenElse();
+        if_else_msb[i].cond <== n2b_input.bits[i];
+        if_else_msb[i].L <== i;
+        if_else_msb[i].R <== ms_index;
+        ms_index = if_else_msb[i].out;
+    }
+
+    component left_shift = LeftShift(P+1);
+    left_shift.x <== m;
+    left_shift.shift <== P - ms_index;
+    left_shift.skip_checks <== skip_checks;
+
+    signal e_tmp <== e + ms_index - p;
+
+    e_out <== e_tmp;
+    m_out <== left_shift.y;
 }
 
 /*
@@ -307,5 +435,97 @@ template FloatAdd(k, p) {
     signal output e_out;
     signal output m_out;
 
-    // TODO
+    component checkWF[2];
+    checkWF[0] = CheckWellFormedness(k, p);
+    checkWF[0].e <== e[0];
+    checkWF[0].m <== m[0];
+    checkWF[1] = CheckWellFormedness(k, p);
+    checkWF[1].e <== e[1];
+    checkWF[1].m <== m[1];
+
+    // (e[0] << (p+1))
+    component left_shift[2];
+    left_shift[0] = LeftShift(k+p+1);
+    left_shift[0].x <== e[0];
+    left_shift[0].shift <== p+1;
+    left_shift[0].skip_checks <== 1;
+    left_shift[1] = LeftShift(k+p+1);
+    left_shift[1].x <== e[1];
+    left_shift[1].shift <== p+1;
+    left_shift[1].skip_checks <== 1;
+
+    // (e_1 << (p+1)) + m_1
+    signal mgn_1 <== left_shift[0].y + m[0];
+    // (e_2 << (p+1)) + m_2
+    signal mgn_2 <== left_shift[1].y + m[1];
+
+    component lt = LessThan(k+p+1);
+    lt.in[0] <== mgn_1;
+    lt.in[1] <== mgn_2;
+
+    component if_else[4];
+    if_else[0] = IfThenElse();
+    if_else[0].cond <== lt.out;
+    if_else[0].L <== e[1];
+    if_else[0].R <== e[0];
+    signal e_alpha <== if_else[0].out;
+
+    if_else[1] = IfThenElse();
+    if_else[1].cond <== lt.out;
+    if_else[1].L <== m[1];
+    if_else[1].R <== m[0];
+    signal m_alpha <== if_else[1].out;
+
+    if_else[2] = IfThenElse();
+    if_else[2].cond <== lt.out;
+    if_else[2].L <== m[0];
+    if_else[2].R <== m[1];
+    signal m_beta <== if_else[2].out;
+
+    if_else[3] = IfThenElse();
+    if_else[3].cond <== lt.out;
+    if_else[3].L <== e[0];
+    if_else[3].R <== e[1];
+    signal e_beta <== if_else[3].out;
+
+    signal diff <== e_alpha - e_beta;
+
+    component lt2 = LessThan(k+p+1);
+    lt2.in[0] <== p + 1;
+    lt2.in[1] <== diff;
+
+    component is_eq = IsEqual();
+    is_eq.in[0] <== e_alpha;
+    is_eq.in[1] <== 0;
+
+    component is_or = OR();
+    is_or.a <== lt2.out;
+    is_or.b <== is_eq.out;
+
+    component left_shift2 = LeftShift(k+p+1);
+    left_shift2.x <== m_alpha;
+    left_shift2.shift <== diff;
+    left_shift2.skip_checks <== 1;
+
+    component norm = Normalize(k, p, 2*p+1);
+    norm.e <== e_beta;
+    norm.m <== left_shift2.y + m_beta;
+    norm.skip_checks <== 1;
+
+    component round_check = RoundAndCheck(k, p, 2*p+1);
+    round_check.e <== norm.e_out;
+    round_check.m <== norm.m_out;
+
+    log(is_or.out);
+    component if_else2 = IfThenElse();
+    if_else2.cond <== is_or.out;
+    if_else2.L <== e_alpha;
+    if_else2.R <== round_check.e_out;
+    e_out <== if_else2.out;
+
+    component if_else3 = IfThenElse();
+    if_else3.cond <== is_or.out;
+    if_else3.L <== m_alpha;
+    if_else3.R <== round_check.m_out;
+    m_out <== if_else3.out;
 }
