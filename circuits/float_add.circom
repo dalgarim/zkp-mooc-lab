@@ -148,6 +148,7 @@ template IsEqual() {
 
 /*
  * Checks if `in[0]` < `in[1]` and returns the output in `out`.
+ * Assumes `n` bit inputs. The behavior is not well-defined if any input is more than `n`-bits long.
  */
 template LessThan(n) {
     assert(n <= 252);
